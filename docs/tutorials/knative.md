@@ -1,9 +1,9 @@
 # Knative + urunc: Deploying Serverless Unikernels
 
 This guide walks you through deploying [Knative Serving](https://knative.dev/)
-using [`urunc`](https://github.com/urunc-dev/urunc). You’ll build Knative from
-a custom branch and use [`ko`](https://github.com/ko-build/ko) for seamless
-image building and deployment.
+with urunc support on Kubernetes. We provide pre-built binaries for quick setup,
+or you can build Knative from source using [`ko`](https://github.com/ko-build/ko)
+for custom configurations.
 
 ## Prerequisites
 
@@ -14,63 +14,67 @@ image building and deployment.
     
 ## Environment Setup
 
-Install [Docker](/quickstart/#install-docker), Go >= 1.21, and `ko`:
+Install [Docker](/quickstart/#install-docker), Go [[ versions.go ]], and `ko`:
 
-### Install Go 1.21  
-
+### Install Go [[ versions.go ]]
 ```bash
-sudo mkdir /usr/local/go1.21
-wget https://go.dev/dl/go1.21.5.linux-amd64.tar.gz
-sudo tar -zxvf go1.21.5.linux-amd64.tar.gz -C /usr/local/go1.21/
-rm go1.21.5.linux-amd64.tar.gz
+wget https://go.dev/dl/go[[ versions.go ]].linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -zxvf go[[ versions.go ]].linux-amd64.tar.gz -C /usr/local/
+rm go[[ versions.go ]].linux-amd64.tar.gz
 ```
 
-### Verify Go installation (Should be 1.21.5)
+### Verify Go installation (Should be [[ versions.go ]])
 
 ```console
-$ export GOROOT=/usr/local/go1.21/go 
-$ export PATH=$GOROOT/bin:$PATH  
+$ export PATH=/usr/local/go/bin:$PATH  
 $ export GOPATH=$HOME/go 
 $ go version
-go version go1.21.5 linux/amd64
+go version go[[ versions.go ]] linux/amd64
 ```
 
-### Install ko VERSION=0.15.1
+### Install ko (latest)
 ```bash
-export OS=Linux
-export ARCH=x86_64
-curl -sSfL "https://github.com/ko-build/ko/releases/download/v${VERSION}/ko_${VERSION}_${OS}_${ARCH}.tar.gz" -o ko.tar.gz
-sudo tar -zxvf ko.tar.gz -C /usr/local/bin` 
+curl -sSfL https://github.com/ko-build/ko/releases/latest/download/ko_Linux_x86_64.tar.gz | sudo tar xzf - -C /usr/local/bin
+ko version
 ```
 
 ## Clone and Build Knative with the queue-proxy patch
 
 ### Set your container registry  
 
-> Note: You should be able to use dockerhub for this. e.g. `<yourdockerhubid>/knative`
+> Note: You should be able to use Docker Hub for this. e.g. `<yourdockerhubid>/knative`
 
 ```bash
-export KO_DOCKER_REPO='harbor.nbfc.io/nubificus/knative-install-urunc'
+export KO_DOCKER_REPO='<your-registry>/knative'
 ```
 
-### Clone urunc-enabled Knative Serving 
-```bash
-git clone https://github.com/nubificus/serving -b feat_urunc 
-cd serving/
-ko resolve -Rf ./config/core/ > knative-custom.yaml
-```
+### Option 1: Use Pre-built Knative (Recommended)
 
-### Apply knative's manifests to the local k8s
-```bash
-kubectl apply -f knative-custom.yaml
-```
+The quickest way to get started is to use our pre-built Knative binaries with urunc support:
 
-Alternatively, you could use our latest build:
 ```bash
 kubectl apply -f https://s3.nbfc.io/knative/knative-v[[ versions.knative ]]-urunc-5220308.yaml
 ```
 
-> Note: There are cases where due to the large manifests, kubectl fails. Try a second time, or use `kubectl create -f https://s3.nbfc.io/knative/knative-v[[ versions.knative ]]-urunc-5220308.yaml`
+If the manifest is too large and kubectl fails, try again or use:
+```bash
+kubectl create -f https://s3.nbfc.io/knative/knative-v[[ versions.knative ]]-urunc-5220308.yaml
+```
+
+### Option 2: Build Knative from Source
+
+If you need to build Knative with custom modifications using urunc support:
+
+```bash
+# Clone urunc-enabled Knative Serving with urunc patches
+git clone https://github.com/nubificus/serving -b feat_urunc
+cd serving/
+
+# Build and deploy
+ko resolve -Rf ./config/core/ > knative-custom.yaml
+kubectl apply -f knative-custom.yaml
+```
 
 ## Setup Networking (Kourier)
 
