@@ -8,15 +8,35 @@ for custom configurations.
 ## Prerequisites
 
 -   A running Kubernetes cluster
+-   `urunc` installed (follow the [installation guide](https://urunc.io/tutorials/How-to-urunc-on-k8s/))
+
+## Install Knative Serving
+
+### Option 1: Use Pre-built Knative (Recommended)
+
+Apply the pre-built Knative manifests with urunc support:
+
+```bash
+kubectl apply -f https://s3.nbfc.io/knative/knative-v[[ versions.knative ]]-urunc-5220308.yaml
+```
+
+> Note: There are cases where due to the large manifests, kubectl fails. Try a second time, or use `kubectl create -f https://s3.nbfc.io/knative/knative-v[[ versions.knative ]]-urunc-5220308.yaml`
+
+### Option 2: Build Knative from Source
+
+If you prefer to build Knative yourself, follow these steps.
+
+#### Prerequisites for building from source
+
 -   A Docker-compatible registry (e.g. Harbor, Docker Hub)
 -   Ubuntu 20.04 or newer
 -   Basic `git`, `curl`, `kubectl`, and `docker` installed
-    
-## Environment Setup
+
+#### Environment Setup
 
 Install [Docker](/quickstart/#install-docker), Go [[ versions.go ]], and `ko`:
 
-### Install Go [[ versions.go ]]
+##### Install Go [[ versions.go ]]
 ```bash
 wget https://go.dev/dl/go[[ versions.go ]].linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
@@ -24,7 +44,7 @@ sudo tar -zxvf go[[ versions.go ]].linux-amd64.tar.gz -C /usr/local/
 rm go[[ versions.go ]].linux-amd64.tar.gz
 ```
 
-### Verify Go installation (Should be [[ versions.go ]])
+##### Verify Go installation (Should be [[ versions.go ]])
 
 ```console
 $ export PATH=/usr/local/go/bin:$PATH  
@@ -33,15 +53,13 @@ $ go version
 go version go[[ versions.go ]] linux/amd64
 ```
 
-### Install ko (latest)
+##### Install ko (latest)
 ```bash
 curl -sSfL https://github.com/ko-build/ko/releases/latest/download/ko_Linux_x86_64.tar.gz | sudo tar xzf - -C /usr/local/bin
 ko version
 ```
 
-## Clone and Build Knative with the queue-proxy patch
-
-### Set your container registry  
+#### Set your container registry  
 
 > Note: You should be able to use Docker Hub for this. e.g. `<yourdockerhubid>/knative`
 
@@ -49,30 +67,17 @@ ko version
 export KO_DOCKER_REPO='<your-registry>/knative'
 ```
 
-### Option 1: Use Pre-built Knative (Recommended)
-
-The quickest way to get started is to use our pre-built Knative binaries with urunc support:
+#### Clone urunc-enabled Knative Serving and build
 
 ```bash
-kubectl apply -f https://s3.nbfc.io/knative/knative-v[[ versions.knative ]]-urunc-5220308.yaml
-```
-
-If the manifest is too large and kubectl fails, try again or use:
-```bash
-kubectl create -f https://s3.nbfc.io/knative/knative-v[[ versions.knative ]]-urunc-5220308.yaml
-```
-
-### Option 2: Build Knative from Source
-
-If you need to build Knative with custom modifications using urunc support:
-
-```bash
-# Clone urunc-enabled Knative Serving with urunc patches
 git clone https://github.com/nubificus/serving -b feat_urunc
 cd serving/
-
-# Build and deploy
 ko resolve -Rf ./config/core/ > knative-custom.yaml
+```
+
+#### Apply knative's manifests to the local k8s
+
+```bash
 kubectl apply -f knative-custom.yaml
 ```
 
@@ -125,7 +130,19 @@ kubectl apply -f https://raw.githubusercontent.com/nubificus/c-httpreply/refs/he
 kubectl get ksvc -A -o wide 
 ```
 
-### Test the service (replace IP with actual ingress IP) 
+### Get the ingress IP
+
+Before testing the service, get the IP address of the Kourier internal service:
+
+```bash
+kubectl get svc -n kourier-system kourier-internal -o jsonpath='{.spec.clusterIP}'
+```
+
+Note the IP address returned (e.g., `10.244.9.220`). You'll use this in the following curl commands.
+
+### Test the service
+
+Replace `<INGRESS_IP>` with the IP address from the previous step:
 
 ```bash
 curl -v -H "Host: hellocontainerc.default.127.0.0.1.nip.io" http://<INGRESS_IP>
@@ -145,9 +162,7 @@ NAME             URL                                                  LATESTCREA
 hellounikernelfc http://hellounikernelfc.default.127.0.0.1.nip.io     hellounikernelfc-00001     hellounikernelfc-00001     True
 ```
 
-and once it's on a `Ready` state, you could issue a request:
-> Note: 10.244.9.220 is the IP of the `kourier-internal` svc. You can check your own from:
-> `kubectl get svc -n kourier-system |grep kourier-internal`
+Once it's in a `Ready` state, invoke the function using the ingress IP you obtained earlier:
 
 ```console
 $ curl -v -H "Host: hellounikernelfc.default.127.0.0.1.nip.io" http://10.244.9.220:80
@@ -169,9 +184,3 @@ $ curl -v -H "Host: hellounikernelfc.default.127.0.0.1.nip.io" http://10.244.9.2
 Hello, World!
 * Connection #0 to host 10.244.9.220 left intact
 ```
-
-## Wrapping Up
-
-You're now running unikernel-based workloads via Knative and `urunc`! With this
-setup, you can push the boundaries of lightweight, secure, and high-performance
-serverless deployments — all within a Kubernetes-native environment.
