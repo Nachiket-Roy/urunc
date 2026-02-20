@@ -36,24 +36,19 @@ If you prefer to build Knative yourself, follow these steps.
 
 Install [Docker](/quickstart/#install-docker), Go [[ versions.go ]], and `ko`:
 
-##### Install Go [[ versions.go ]]
-```bash
-wget https://go.dev/dl/go[[ versions.go ]].linux-amd64.tar.gz
-sudo rm -rf /usr/local/go
-sudo tar -zxvf go[[ versions.go ]].linux-amd64.tar.gz -C /usr/local/
-rm go[[ versions.go ]].linux-amd64.tar.gz
-```
+##### Install Go (≥ 1.23)
 
-##### Verify Go installation (Should be [[ versions.go ]])
+Please follow the official [Go installation instructions](https://go.dev/doc/install) to install Go 1.23 or newer.
+
+##### Verify Go installation
 
 ```console
 $ export PATH=/usr/local/go/bin:$PATH  
 $ export GOPATH=$HOME/go 
 $ go version
-go version go[[ versions.go ]] linux/amd64
 ```
 
-##### Install ko (latest)
+##### Install ko
 ```bash
 curl -sSfL https://github.com/ko-build/ko/releases/latest/download/ko_Linux_x86_64.tar.gz | sudo tar xzf - -C /usr/local/bin
 ko version
