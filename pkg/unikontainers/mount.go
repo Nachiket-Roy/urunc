@@ -33,6 +33,19 @@ import (
 
 var ErrCopyDir = errors.New("can not copy a directory")
 
+var (
+	mountSyscall        = unix.Mount
+	mknodSyscall        = unix.Mknod
+	statSyscall         = unix.Stat
+	chmodSyscall        = unix.Chmod
+	openSyscall         = unix.Open
+	closeSyscall        = unix.Close
+	chownSyscall        = os.Chown
+	runningInUserNSHook = userns.RunningInUserNS
+	osChmodHook         = os.Chmod
+	mkdirAllHook        = os.MkdirAll
+)
+
 type mountFlagStruct struct {
 	clear bool
 	flag  int
@@ -47,25 +60,25 @@ func createTmpfs(monRootfs string, path string, flags uint64, mode string, size 
 	mountType := "tmpfs"
 	data := "mode=" + mode + ",size=" + size
 
-	err := os.MkdirAll(dstPath, 0755)
+	err := mkdirAllHook(dstPath, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to create %s dir: %w", path, err)
 	}
 
-	err = unix.Mount(mountType, dstPath, mountType, uintptr(flags), data)
+	err = mountSyscall(mountType, dstPath, mountType, uintptr(flags), data)
 	if err != nil {
 		return fmt.Errorf("failed to mount %s tmpfs: %w", path, err)
 	}
 
 	// Remove propagation
-	err = unix.Mount("", dstPath, "", unix.MS_PRIVATE, "")
+	err = mountSyscall("", dstPath, "", unix.MS_PRIVATE, "")
 	if err != nil {
 		return fmt.Errorf("failed to create %s tmpfs: %w", path, err)
 	}
 
 	if mode == "1777" {
 		// sonarcloud:go:S2612 -- This is a tmpfs mount point, sticky bit 1777 is required (like /tmp), controlled path, safe by design
-		err := os.Chmod(dstPath, 01777) // NOSONAR
+		err := osChmodHook(dstPath, 01777) // NOSONAR
 		if err != nil {
 			return fmt.Errorf("failed to chmod %s: %w", path, err)
 		}
@@ -83,13 +96,13 @@ func createTmpfs(monRootfs string, path string, flags uint64, mode string, size 
 func setupDev(monRootfs string, devPath string) error {
 	// In a user namespace, always bind-mount the existing host device node.
 	// Only MS_BIND is used here (no extra flags) to mirror runc's device handling.
-	if userns.RunningInUserNS() {
+	if runningInUserNSHook() {
 		return fileFromHost(monRootfs, devPath, "", unix.MS_BIND, false)
 	}
 
 	// Get info of the original file
 	var devStat unix.Stat_t
-	err := unix.Stat(devPath, &devStat)
+	err := statSyscall(devPath, &devStat)
 	if err != nil {
 		return fmt.Errorf("failed to stat dev %s: %w", devPath, err)
 	}
@@ -116,14 +129,14 @@ func setupDev(monRootfs string, devPath string) error {
 	// the necessary directories
 	if filepath.Dir(devPath) != "/dev" {
 		dstDir := filepath.Dir(dstPath)
-		err = os.MkdirAll(dstDir, 0755)
+		err = mkdirAllHook(dstDir, 0755)
 		if err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dstDir, err)
 		}
 	}
 
 	// Create the new device node
-	err = unix.Mknod(dstPath, devStat.Mode, int(newDev)) //nolint: gosec
+	err = mknodSyscall(dstPath, devStat.Mode, int(newDev)) //nolint: gosec
 	if err != nil {
 		return fmt.Errorf("failed to make device node %s: %w", dstPath, err)
 	}
@@ -133,13 +146,13 @@ func setupDev(monRootfs string, devPath string) error {
 	// removes the burdain of getting kvm/block group id
 	permBits := devStat.Mode & 0o777
 	permBits |= 0o006
-	err = unix.Chmod(dstPath, permBits)
+	err = chmodSyscall(dstPath, permBits)
 	if err != nil {
 		return fmt.Errorf("failed to chmod %s: %w", dstPath, err)
 	}
 
 	// Set the owner as in the original file
-	err = os.Chown(dstPath, int(devStat.Uid), int(devStat.Gid))
+	err = chownSyscall(dstPath, int(devStat.Uid), int(devStat.Gid))
 	if err != nil {
 		return fmt.Errorf("failed to chown %s: %w", dstPath, err)
 	}
@@ -159,7 +172,7 @@ func setupDev(monRootfs string, devPath string) error {
 func fileFromHost(monRootfs string, hostPath string, target string, mFlags int, withCopy bool) error {
 	// Get the info of the original file
 	var fileInfo unix.Stat_t
-	err := unix.Stat(hostPath, &fileInfo)
+	err := statSyscall(hostPath, &fileInfo)
 	if err != nil {
 		return err
 	}
@@ -200,12 +213,12 @@ func fileFromHost(monRootfs string, hostPath string, target string, mFlags int, 
 	// If a copy is created, set up the permissions and ownership to match the original file.
 	// For bind mounts the host inode attributes remain unchanged.
 	if withCopy {
-		err = unix.Chmod(dstPath, fileInfo.Mode)
+		err = chmodSyscall(dstPath, fileInfo.Mode)
 		if err != nil {
 			return fmt.Errorf("failed to chmod %s: %w", dstPath, err)
 		}
 
-		err = os.Chown(dstPath, int(fileInfo.Uid), int(fileInfo.Gid))
+		err = chownSyscall(dstPath, int(fileInfo.Uid), int(fileInfo.Gid))
 		if err != nil {
 			return fmt.Errorf("failed to chown %s: %w", dstPath, err)
 		}
@@ -218,7 +231,7 @@ func fileFromHost(monRootfs string, hostPath string, target string, mFlags int, 
 	// mount flags.
 	if mFlags & ^(unix.MS_BIND|unix.MS_REC|unix.MS_REMOUNT) != 0 {
 		flags := mFlags | unix.MS_BIND | unix.MS_REMOUNT
-		err = unix.Mount(dstPath, dstPath, "", uintptr(flags), "")
+		err = mountSyscall(dstPath, dstPath, "", uintptr(flags), "")
 		if err != nil {
 			return fmt.Errorf("failed to set mount flags for %s: %w", dstPath, err)
 		}
@@ -230,23 +243,23 @@ func fileFromHost(monRootfs string, hostPath string, target string, mFlags int, 
 // bindMountFile bind mounts a file/directory to a new path
 func bindMountFile(hostPath string, dstDir string, dstPath string, perm uint32, mFlags int, isDir bool) error {
 	var mountTarget string
-	err := os.MkdirAll(dstDir, 0755)
+	err := mkdirAllHook(dstDir, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dstDir, err)
 	}
 
 	if !isDir {
-		dstFile, err1 := unix.Open(dstPath, unix.O_CREAT, perm)
+		dstFile, err1 := openSyscall(dstPath, unix.O_CREAT, perm)
 		if err1 != nil {
 			return fmt.Errorf("failed to create file %s: %w", dstPath, err1)
 		}
-		unix.Close(dstFile)
+		closeSyscall(dstFile)
 		mountTarget = dstPath
 	} else {
 		mountTarget = dstDir
 	}
 
-	err = unix.Mount(hostPath, mountTarget, "", uintptr(mFlags), "")
+	err = mountSyscall(hostPath, mountTarget, "", uintptr(mFlags), "")
 	if err != nil {
 		return fmt.Errorf("failed to bind mount %s: %w", mountTarget, err)
 	}
@@ -288,7 +301,7 @@ func rootfsParentMountPrivate(path string) error {
 	// and EINVAL means this is not a mount point, so traverse up until we
 	// find one.
 	for {
-		err = unix.Mount("", path, "", unix.MS_PRIVATE, "")
+		err = mountSyscall("", path, "", unix.MS_PRIVATE, "")
 		if err == nil {
 			return nil
 		}
@@ -314,7 +327,7 @@ func prepareRoot(path string, rootfsPropagation string) error {
 		}
 	}
 
-	err := unix.Mount("", "/", "", uintptr(flag), "")
+	err := mountSyscall("", "/", "", uintptr(flag), "")
 	if err != nil {
 		return err
 	}
@@ -324,7 +337,7 @@ func prepareRoot(path string, rootfsPropagation string) error {
 		return err
 	}
 
-	return unix.Mount(path, path, "bind", unix.MS_BIND|unix.MS_REC, "")
+	return mountSyscall(path, path, "bind", unix.MS_BIND|unix.MS_REC, "")
 }
 
 func mountVolumes(rootfsPath string, mounts []specs.Mount) error {
@@ -366,7 +379,7 @@ func mountVolumes(rootfsPath string, mounts []specs.Mount) error {
 
 		dstPath := filepath.Join(rootfsPath, m.Destination)
 		for _, pFlag := range propFlag {
-			err = unix.Mount(dstPath, dstPath, "", uintptr(pFlag), "")
+			err = mountSyscall(dstPath, dstPath, "", uintptr(pFlag), "")
 			if err != nil {
 				return fmt.Errorf("failed to set propagation flag for %s: %w", m.Source, err)
 			}
